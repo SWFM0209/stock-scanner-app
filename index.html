@@ -224,12 +224,25 @@ async function loadScan() {
     const list = document.getElementById("list");
     list.innerHTML = '<div class="loading">載入掃描結果中...</div>';
 
-    try {
+    async function fetchScanOnce() {
         const res = await fetch(API_BASE + "/scan");
-        const data = await res.json();
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
+        return await res.json();
+    }
+
+    try {
+        let data;
+
+        try {
+            data = await fetchScanOnce();
+        } catch (e) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            data = await fetchScanOnce();
+        }
 
         const rows = data.data || [];
-
         rows.sort((a, b) => Number(b.score ?? -999) - Number(a.score ?? -999));
 
         if (!rows.length) {
@@ -292,6 +305,10 @@ async function loadAnalysis(symbol) {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({ symbol })
         });
+
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
 
         const data = await res.json();
 
