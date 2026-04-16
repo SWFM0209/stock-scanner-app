@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-pandas
-yfinance
 pydantic
 google-genai
+fugle-marketdata
+requests

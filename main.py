@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import pandas as pd
-import yfinance as yf
 import os
 from google import genai
+from fugle_marketdata import RestClient
 
 app = FastAPI()
 
@@ -26,186 +25,101 @@ def load_symbols():
         return [line.strip() for line in f if line.strip()]
 
 
-def breakout_retest_strategy(
-    df,
-    period=60,
-    vol_mult=1.6,
-    atr_len=14,
-    body_atr_mult=0.6
-):
-    df = df.copy()
-
-    df["h1"] = df["high"].shift(1).rolling(period).max()
-    df["vol_avg_p"] = df["volume"].rolling(period).mean()
-    df["cond_vol"] = df["volume"] > vol_mult * df["vol_avg_p"]
-
-    prev_close = df["close"].shift(1)
-    tr1 = df["high"] - df["low"]
-    tr2 = (df["high"] - prev_close).abs()
-    tr3 = (df["low"] - prev_close).abs()
-    df["true_range"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-    df["atr_n"] = df["true_range"].rolling(atr_len).mean()
-    df["real_body"] = (df["close"] - df["open"]).abs()
-
-    df["cond_break"] = (df["close"] > df["open"]) & (
-        df["real_body"] > body_atr_mult * df["atr_n"]
-    )
-
-    df["cdp"] = (
-        df["high"].shift(1)
-        + df["low"].shift(1)
-        + 2 * df["close"].shift(1)
-    ) / 4
-
-    df["anchor"] = None
-    df["signal"] = 0
-    df["break_state"] = 0
-
-    break_state = 0
-    anchor = None
-
-    for i in range(len(df)):
-        row = df.iloc[i]
-
-        if (
-            pd.isna(row["h1"])
-            or pd.isna(row["vol_avg_p"])
-            or pd.isna(row["atr_n"])
-            or pd.isna(row["cdp"])
-        ):
-            df.at[df.index[i], "anchor"] = anchor
-            df.at[df.index[i], "break_state"] = break_state
-            continue
-
-        if break_state == 0:
-            if (
-                row["close"] > row["h1"]
-                and row["close"] > row["cdp"]
-                and row["cond_vol"]
-                and row["cond_break"]
-            ):
-                anchor = row["h1"]
-                break_state = 1
-
-        elif break_state == 1:
-            if (
-                row["low"] <= anchor
-                and row["close"] > anchor
-                and row["close"] > row["cdp"]
-            ):
-                df.at[df.index[i], "signal"] = 1
-                break_state = 2
-
-        df.at[df.index[i], "anchor"] = anchor
-        df.at[df.index[i], "break_state"] = break_state
-
-    return df
-
-def get_price_data(symbol: str):
-    symbols_to_try = [
-        f"{symbol}.TW",
-        f"{symbol}.TWO"
-    ]
-
-    df = pd.DataFrame()
-
-    for s in symbols_to_try:
-        try:
-            print(f"Trying {s}")
-            df = yf.download(
-                s,
-                period="6mo",
-                interval="1d",
-                auto_adjust=False,
-                progress=False
-            )
-            if not df.empty:
-                print(f"SUCCESS: {s}")
-                break
-        except Exception as e:
-            print(f"FAIL: {s} -> {e}")
-
-    if df.empty:
-        raise ValueError(f"無法下載 {symbol} 的股價資料")
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    df = df.rename(columns={
-        "Open": "open",
-        "High": "high",
-        "Low": "low",
-        "Close": "close",
-        "Volume": "volume"
-    })
-
-    needed_cols = ["open", "high", "low", "close", "volume"]
-    missing = [c for c in needed_cols if c not in df.columns]
-    if missing:
-        raise ValueError(f"{symbol} 缺少欄位: {missing}")
-
-    df = df[needed_cols].copy()
-
-    for col in needed_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df = df.dropna().reset_index(drop=True)
-    return df
+def get_fugle_client():
+    api_key = os.getenv("FUGLE_API_KEY")
+    if not api_key:
+        raise ValueError("未設定 FUGLE_API_KEY")
+    return RestClient(api_key=api_key)
 
 
+def get_stock_realtime(symbol: str):
+    client = get_fugle_client()
+    stock = client.stock
 
-def calc_score(close, anchor, volume, break_state, signal):
-    breakout_strength = 0.0
-    if anchor is not None and anchor != 0:
-        breakout_strength = (close - anchor) / anchor
+    ticker = stock.intraday.ticker(symbol=symbol)
+    quote = stock.intraday.quote(symbol=symbol)
+
+    return {
+        "ticker": ticker,
+        "quote": quote
+    }
+
+
+def safe_get_close(data: dict):
+    quote = data.get("quote", {})
+    if quote.get("priceLast") is not None:
+        return float(quote["priceLast"])
+    if quote.get("closePrice") is not None:
+        return float(quote["closePrice"])
+    raise ValueError("取不到最新成交價")
+
+
+def safe_get_volume(data: dict):
+    quote = data.get("quote", {})
+    if quote.get("tradeVolume") is not None:
+        return int(quote["tradeVolume"])
+    if quote.get("volume") is not None:
+        return int(quote["volume"])
+    return 0
+
+
+def safe_get_open(data: dict):
+    quote = data.get("quote", {})
+    if quote.get("priceOpen") is not None:
+        return float(quote["priceOpen"])
+    return None
+
+
+def safe_get_high(data: dict):
+    quote = data.get("quote", {})
+    if quote.get("priceHigh") is not None:
+        return float(quote["priceHigh"])
+    return None
+
+
+def calc_realtime_score(close: float, open_price, high_price, volume: int):
+    change_strength = 0.0
+    intraday_position = 0.0
+
+    if open_price and open_price != 0:
+        change_strength = (close - open_price) / open_price
+
+    if high_price and high_price != 0:
+        intraday_position = close / high_price
 
     volume_score = volume / 1_000_000
 
-    if signal == 1:
-        signal_bonus = 1.0
-    elif break_state == 1:
-        signal_bonus = 0.5
-    else:
-        signal_bonus = 0.0
-
-    price_position = 1.0 if (anchor is not None and close > anchor) else 0.0
-
     score = (
-        breakout_strength * 50
+        change_strength * 100
+        + intraday_position * 20
         + volume_score * 0.2
-        + signal_bonus * 20
-        + price_position * 10
     )
 
-    return round(score, 3), breakout_strength
+    return round(score, 3), round(change_strength, 3)
 
 
-def build_stock_result(symbol: str, last_row):
-    anchor = float(last_row["anchor"]) if pd.notna(last_row["anchor"]) else None
-    close = float(last_row["close"])
-    volume = int(last_row["volume"])
-    break_state = int(last_row["break_state"])
-    signal = int(last_row["signal"])
+def build_stock_result(symbol: str, data: dict):
+    close = safe_get_close(data)
+    volume = safe_get_volume(data)
+    open_price = safe_get_open(data)
+    high_price = safe_get_high(data)
 
-    score, breakout_strength = calc_score(
+    score, strength = calc_realtime_score(
         close=close,
-        anchor=anchor,
-        volume=volume,
-        break_state=break_state,
-        signal=signal
+        open_price=open_price,
+        high_price=high_price,
+        volume=volume
     )
 
     return {
         "symbol": symbol,
         "close": close,
         "volume": volume,
-        "anchor": anchor,
-        "break_state": break_state,
-        "signal": signal,
-        "strength": round(breakout_strength, 3),
+        "open": open_price,
+        "high": high_price,
+        "strength": strength,
         "score": score,
-        "reason": "已完成回踩訊號" if signal == 1 else "已突破，等待回踩"
+        "reason": "富果即時行情掃描"
     }
 
 
@@ -216,20 +130,14 @@ def run_post_market_scan():
     for idx, symbol in enumerate(symbols, start=1):
         try:
             print(f"[{idx}/{len(symbols)}] scanning {symbol}")
-
-            df = get_price_data(symbol)
-            result_df = breakout_retest_strategy(df)
-            last_row = result_df.iloc[-1]
-
-            if int(last_row["break_state"]) in [1, 2]:
-                matched.append(build_stock_result(symbol, last_row))
-
+            data = get_stock_realtime(symbol)
+            matched.append(build_stock_result(symbol, data))
         except Exception as e:
             print(f"error: {symbol} - {e}")
 
     matched = sorted(
         matched,
-        key=lambda x: (x["score"], x["signal"], x["volume"]),
+        key=lambda x: (x["score"], x["volume"]),
         reverse=True
     )
 
@@ -243,67 +151,47 @@ def analyze_stock_logic(symbol: str):
             "error": "symbol 格式錯誤，請輸入股票代號"
         }
 
-    df = get_price_data(symbol)
-    result_df = breakout_retest_strategy(df)
-    last_row = result_df.iloc[-1]
+    data = get_stock_realtime(symbol)
+    close = safe_get_close(data)
+    volume = safe_get_volume(data)
+    open_price = safe_get_open(data)
+    high_price = safe_get_high(data)
 
-    close = float(last_row["close"])
-    anchor = float(last_row["anchor"]) if pd.notna(last_row["anchor"]) else None
-    volume = int(last_row["volume"])
-    break_state = int(last_row["break_state"])
-    signal = int(last_row["signal"])
-
-    score, breakout_strength = calc_score(
+    score, strength = calc_realtime_score(
         close=close,
-        anchor=anchor,
-        volume=volume,
-        break_state=break_state,
-        signal=signal
+        open_price=open_price,
+        high_price=high_price,
+        volume=volume
     )
-
-    if signal == 1:
-        stage_text = "已完成回踩訊號"
-    elif break_state == 1:
-        stage_text = "已突破，等待回踩"
-    else:
-        stage_text = "目前未進入有效 Breakout Retest 階段"
 
     pros = []
     risks = []
 
-    if break_state >= 1:
-        pros.append("股價已突破前高區")
-    if signal == 1:
-        pros.append("回踩後仍站回 anchor 之上")
-    if anchor is not None and close > anchor:
-        pros.append("目前價格仍高於 anchor")
+    if open_price is not None and close > open_price:
+        pros.append("現價高於開盤價，日內偏強")
+    if high_price is not None and close >= high_price * 0.98:
+        pros.append("目前價格接近日內高點")
     if volume > 0:
-        pros.append("近期有量能資料可供追蹤")
+        pros.append("有即時成交量可供追蹤")
 
-    if break_state == 1 and signal == 0:
-        risks.append("尚未完成回踩確認，可能是假突破")
-    if breakout_strength < 0.02:
-        risks.append("突破幅度不大，後續容易震盪")
-    if anchor is None:
-        risks.append("目前尚無明確 anchor 可追蹤")
+    if open_price is not None and close < open_price:
+        risks.append("現價低於開盤價，日內轉弱風險存在")
+    if high_price is not None and close < high_price * 0.95:
+        risks.append("距離日內高點有明顯回落")
+    if volume == 0:
+        risks.append("成交量不足，判讀可靠度較低")
 
-    if signal == 1:
-        suggestion = "偏強，可列入優先觀察名單，後續觀察是否續量上攻。"
-    elif break_state == 1:
-        suggestion = "先觀察回踩是否守住 anchor，再考慮後續動作。"
-    else:
-        suggestion = "目前不屬於此策略的有效候選股。"
+    suggestion = "可列入觀察名單，搭配盤中量價變化再決定是否進一步追蹤。"
 
     return {
         "symbol": symbol,
         "close": close,
-        "anchor": anchor,
+        "open": open_price,
+        "high": high_price,
         "volume": volume,
-        "break_state": break_state,
-        "signal": signal,
-        "strength": round(breakout_strength, 3),
+        "strength": strength,
         "score": score,
-        "stage": stage_text,
+        "stage": "富果即時行情分析",
         "pros": pros,
         "risks": risks,
         "suggestion": suggestion
@@ -321,31 +209,40 @@ def analyze_stock_with_gemini(rule_result: dict):
 你是一個台股短線技術分析助理。
 
 股票：{rule_result["symbol"]}
-價格：{rule_result["close"]}
+目前價格：{rule_result["close"]}
+開盤價：{rule_result.get("open")}
+日內高點：{rule_result.get("high")}
+成交量：{rule_result["volume"]}
 score：{rule_result["score"]}
 strength：{rule_result["strength"]}
-狀態：{rule_result["stage"]}
+分析階段：{rule_result["stage"]}
 
 優點：
-{chr(10).join(rule_result["pros"])}
+{chr(10).join(rule_result["pros"]) if rule_result["pros"] else "無"}
 
 風險：
-{chr(10).join(rule_result["risks"])}
+{chr(10).join(rule_result["risks"]) if rule_result["risks"] else "無"}
 
-請用繁體中文、簡單白話回答：
-1. 這檔在強什麼
-2. 有沒有風險
-3. 建議現在怎麼做
-
-請簡潔、像真的分析師，不要太空泛。
+請用繁體中文、簡潔白話回答：
+1. 這檔目前強在哪
+2. 主要風險
+3. 接下來該怎麼觀察
 """
 
-    response = client.models.generate_content(
-        model="gemini-1.5-flash",
-        contents=prompt
-    )
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro"]
+    last_error = "未知錯誤"
 
-    return {"llm_analysis": response.text}
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            return {"llm_analysis": response.text}
+        except Exception as e:
+            last_error = str(e)
+
+    return {"llm_analysis": f"AI 分析暫時無法使用：{last_error}"}
 
 
 @app.get("/")
