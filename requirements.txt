@@ -3,4 +3,5 @@ uvicorn
 pydantic
 google-genai
 fugle-marketdata
+yfinance
 requests
