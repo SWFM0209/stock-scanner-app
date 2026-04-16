@@ -102,27 +102,29 @@ def breakout_retest_strategy(
 
     return df
 
-
 def get_price_data(symbol: str):
-    tw_symbol = f"{symbol}.TW"
-    otc_symbol = f"{symbol}.TWO"
+    symbols_to_try = [
+        f"{symbol}.TW",
+        f"{symbol}.TWO"
+    ]
 
-    df = yf.download(
-        tw_symbol,
-        period="8mo",
-        interval="1d",
-        auto_adjust=False,
-        progress=False
-    )
+    df = pd.DataFrame()
 
-    if df.empty:
-        df = yf.download(
-            otc_symbol,
-            period="8mo",
-            interval="1d",
-            auto_adjust=False,
-            progress=False
-        )
+    for s in symbols_to_try:
+        try:
+            print(f"Trying {s}")
+            df = yf.download(
+                s,
+                period="6mo",
+                interval="1d",
+                auto_adjust=False,
+                progress=False
+            )
+            if not df.empty:
+                print(f"SUCCESS: {s}")
+                break
+        except Exception as e:
+            print(f"FAIL: {s} -> {e}")
 
     if df.empty:
         raise ValueError(f"無法下載 {symbol} 的股價資料")
@@ -150,6 +152,7 @@ def get_price_data(symbol: str):
 
     df = df.dropna().reset_index(drop=True)
     return df
+
 
 
 def calc_score(close, anchor, volume, break_state, signal):
