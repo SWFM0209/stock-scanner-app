@@ -31,7 +31,6 @@ def get_fugle_client():
         raise ValueError("未設定 FUGLE_API_KEY")
     return RestClient(api_key=api_key)
 
-
 def get_stock_realtime(symbol: str):
     client = get_fugle_client()
     stock = client.stock
@@ -39,9 +38,14 @@ def get_stock_realtime(symbol: str):
     ticker = stock.intraday.ticker(symbol=symbol)
     quote = stock.intraday.quote(symbol=symbol)
 
-    return {
+    data = {
         "ticker": ticker,
         "quote": quote
+    }
+
+    print("FUGLE DATA:", data)
+
+    return data
     }
 
 
