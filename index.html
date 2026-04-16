@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Scanner App</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f7fb;
+            color: #111827;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .title {
+            font-size: 32px;
+            font-weight: 700;
+        }
+        .subtitle {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 12px;
+            background: #111827;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover { opacity: 0.92; }
+        .layout {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 20px;
+        }
+        .panel {
+            background: white;
+            border-radius: 18px;
+            padding: 18px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        }
+        .panel-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .stock-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .stock-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            padding: 14px;
+            cursor: pointer;
+            transition: 0.2s ease;
+            background: #fff;
+        }
+        .stock-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+            background: #f9fbff;
+        }
+        .stock-card.signal { border-left: 8px solid #ef4444; }
+        .stock-card.watch { border-left: 8px solid #f59e0b; }
+        .stock-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 10px;
+        }
+        .symbol {
+            font-size: 22px;
+            font-weight: 700;
+        }
+        .reason-badge {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            color: white;
+            background: #2563eb;
+            white-space: nowrap;
+        }
+        .stock-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .metric {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 10px;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        .metric-value {
+            font-size: 15px;
+            font-weight: 700;
+        }
+        .analysis-empty {
+            color: #6b7280;
+            line-height: 1.6;
+        }
+        .analysis-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .analysis-symbol {
+            font-size: 28px;
+            font-weight: 800;
+        }
+        .analysis-stage {
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: #111827;
+            color: white;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .analysis-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .section { margin-top: 16px; }
+        .section h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+        .section ul {
+            margin: 0;
+            padding-left: 20px;
+            line-height: 1.7;
+        }
+        .suggestion {
+            background: #f8fafc;
+            padding: 14px;
+            border-radius: 12px;
+            line-height: 1.7;
+        }
+        .loading {
+            color: #2563eb;
+            font-weight: 700;
+        }
+        .error {
+            color: #dc2626;
+            font-weight: 700;
+        }
+        @media (max-width: 900px) {
+            .layout { grid-template-columns: 1fr; }
+            .stock-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .analysis-metrics { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 520px) {
+            .stock-grid { grid-template-columns: 1fr; }
+            .title { font-size: 26px; }
+            .symbol { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div class="title">📈 Stock Scanner</div>
+        <div class="subtitle">Breakout Retest 強勢股掃描與 AI 分析</div>
+        <div class="toolbar">
+            <button onclick="loadScan()">🔍 掃描股票</button>
+        </div>
+    </div>
+
+    <div class="layout">
+        <div class="panel">
+            <div class="panel-title">掃描排行榜</div>
+            <div id="list" class="stock-list">
+                <div class="analysis-empty">按下「掃描股票」後，這裡會顯示結果。</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">AI 分析</div>
+            <div id="analysisContent" class="analysis-empty">點一檔股票查看分析。</div>
+        </div>
+    </div>
+</div>
+
+<script>
+const API_BASE = "https://pending-favourite-advertise-deal.trycloudflare.com";
+
+async function loadScan() {
+    const list = document.getElementById("list");
+    list.innerHTML = '<div class="loading">載入掃描結果中...</div>';
+
+    try {
+        const res = await fetch(API_BASE + "/scan");
+        const data = await res.json();
+
+        data.results.sort((a, b) => {
+            const signalDiff = Number(b.signal) - Number(a.signal);
+            if (signalDiff !== 0) return signalDiff;
+            return Number(b.strength ?? -999) - Number(a.strength ?? -999);
+        });
+
+        if (!data.results || data.results.length === 0) {
+            list.innerHTML = '<div class="analysis-empty">目前沒有符合條件的股票。</div>';
+            return;
+        }
+
+        list.innerHTML = "";
+
+        data.results.forEach(stock => {
+            const div = document.createElement("div");
+            div.className = "stock-card " + (Number(stock.signal) === 1 ? "signal" : "watch");
+
+            div.innerHTML = `
+                <div class="stock-top">
+                    <div class="symbol">${stock.symbol}</div>
+                    <div class="reason-badge">${stock.reason}</div>
+                </div>
+                <div class="stock-grid">
+                    <div class="metric">
+                        <div class="metric-label">價格</div>
+                        <div class="metric-value">${Number(stock.close).toFixed(2)}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">強度</div>
+                        <div class="metric-value">${stock.strength !== null ? Number(stock.strength).toFixed(3) : "N/A"}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">狀態</div>
+                        <div class="metric-value">${stock.break_state}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">成交量</div>
+                        <div class="metric-value">${Number(stock.volume).toLocaleString()}</div>
+                    </div>
+                </div>
+            `;
+
+            div.onclick = () => loadAnalysis(stock.symbol);
+            list.appendChild(div);
+        });
+
+    } catch (err) {
+        list.innerHTML = '<div class="error">載入失敗：' + err + '</div>';
+        console.error(err);
+    }
+}
+
+async function loadAnalysis(symbol) {
+    const analysis = document.getElementById("analysisContent");
+    analysis.innerHTML = '<div class="loading">分析中...</div>';
+
+    try {
+        const res = await fetch(API_BASE + "/ai/analyze", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ symbol })
+        });
+
+        const data = await res.json();
+
+        if (data.error) {
+            analysis.innerHTML = '<div class="error">分析失敗：' + data.error + '</div>';
+            return;
+        }
+
+        const pros = (data.pros || []).map(x => `<li>${x}</li>`).join("");
+        const risks = (data.risks || []).map(x => `<li>${x}</li>`).join("");
+
+        analysis.innerHTML = `
+            <div class="analysis-head">
+                <div class="analysis-symbol">${data.symbol}</div>
+                <div class="analysis-stage">${data.stage}</div>
+            </div>
+
+            <div class="analysis-metrics">
+                <div class="metric">
+                    <div class="metric-label">目前價格</div>
+                    <div class="metric-value">${data.close}</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Anchor</div>
+                    <div class="metric-value">${data.anchor ?? "N/A"}</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">強度</div>
+                    <div class="metric-value">${data.strength ?? "N/A"}</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>優點</h3>
+                <ul>${pros || "<li>無</li>"}</ul>
+            </div>
+
+            <div class="section">
+                <h3>風險</h3>
+                <ul>${risks || "<li>無</li>"}</ul>
+            </div>
+
+            <div class="section">
+                <h3>建議</h3>
+                <div class="suggestion">${data.suggestion}</div>
+            </div>
+        `;
+    } catch (err) {
+        analysis.innerHTML = '<div class="error">分析失敗：' + err + '</div>';
+        console.error(err);
+    }
+}
+</script>
+</body>
+</html>

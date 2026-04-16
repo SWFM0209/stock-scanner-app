@@ -1,0 +1,51 @@
+def get_price_data(symbol: str):
+    tw_symbol = f"{symbol}.TW"
+    otc_symbol = f"{symbol}.TWO"
+
+    df = yf.download(
+        tw_symbol,
+        period="8mo",
+        interval="1d",
+        auto_adjust=False,
+        progress=False
+    )
+
+    if df.empty:
+        df = yf.download(
+            otc_symbol,
+            period="8mo",
+            interval="1d",
+            auto_adjust=False,
+            progress=False
+        )
+
+    if df.empty:
+        raise ValueError(f"無法下載 {symbol} 的股價資料")
+
+    # 如果是 MultiIndex 欄位，先攤平
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df = df.rename(columns={
+        "Open": "open",
+        "High": "high",
+        "Low": "low",
+        "Close": "close",
+        "Volume": "volume"
+    })
+
+    needed_cols = ["open", "high", "low", "close", "volume"]
+    missing = [c for c in needed_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"{symbol} 缺少欄位: {missing}")
+
+    df = df[needed_cols].copy()
+    df = df.dropna()
+
+    # 強制轉成純數值，避免欄位型態混亂
+    for col in needed_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.dropna().reset_index(drop=True)
+
+    return df
