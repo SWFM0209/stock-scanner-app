@@ -61,60 +61,94 @@ def get_stock_data(symbol: str):
         "stats": stats or {}
     }
 
-    print("FUGLE DATA:", data)
+    print("QUOTE:", quote)
+    print("STATS:", stats)
+    print("TICKER:", ticker)
+
     return data
 
 
 def safe_get_close(data: dict):
     q = data.get("quote", {})
     s = data.get("stats", {})
+    t = data.get("ticker", {})
 
-    if q.get("priceLast") is not None:
-        return float(q["priceLast"])
-    if q.get("closePrice") is not None:
-        return float(q["closePrice"])
-    if s.get("closePrice") is not None:
-        return float(s["closePrice"])
+    val = (
+        q.get("priceLast")
+        or q.get("closePrice")
+        or s.get("closePrice")
+        or t.get("closePrice")
+    )
 
-    raise ValueError("取不到成交價")
+    if val is None:
+        raise ValueError("取不到成交價")
+
+    return float(val)
 
 
 def safe_get_open(data: dict):
     q = data.get("quote", {})
     s = data.get("stats", {})
+    t = data.get("ticker", {})
 
-    return (
+    val = (
         q.get("priceOpen")
         or q.get("openPrice")
         or s.get("openPrice")
-        or None
+        or t.get("openPrice")
     )
+
+    if val is None:
+        return None
+
+    try:
+        return float(val)
+    except Exception:
+        return None
 
 
 def safe_get_high(data: dict):
     q = data.get("quote", {})
     s = data.get("stats", {})
+    t = data.get("ticker", {})
 
-    return (
+    val = (
         q.get("priceHigh")
         or q.get("highPrice")
         or s.get("highPrice")
-        or None
+        or t.get("highPrice")
     )
+
+    if val is None:
+        return None
+
+    try:
+        return float(val)
+    except Exception:
+        return None
 
 
 def safe_get_volume(data: dict):
     q = data.get("quote", {})
     s = data.get("stats", {})
+    t = data.get("ticker", {})
 
     vol = (
         q.get("tradeVolume")
         or q.get("volume")
         or s.get("tradeVolume")
-        or 0
+        or s.get("volume")
+        or t.get("tradeVolume")
+        or t.get("volume")
     )
 
-    return int(vol)
+    if vol is None:
+        return 0
+
+    try:
+        return int(vol)
+    except Exception:
+        return 0
 
 
 def calc_score(close, open_price, high_price, volume):
@@ -135,6 +169,7 @@ def calc_score(close, open_price, high_price, volume):
 
 def make_local_ai_text(rule_result):
     lines = []
+
     lines.append(
         f"• {rule_result['symbol']} 目前分數為 {rule_result['score']}，強度為 {rule_result['strength']}。"
     )
