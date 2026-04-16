@@ -14,6 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class AnalyzeRequest(BaseModel):
     symbol: str
 
@@ -149,6 +150,32 @@ def get_price_data(symbol: str):
     return df
 
 
+def calc_score(close, anchor, volume, break_state, signal):
+    breakout_strength = 0.0
+    if anchor is not None and anchor != 0:
+        breakout_strength = (close - anchor) / anchor
+
+    volume_score = volume / 1_000_000
+
+    if signal == 1:
+        signal_bonus = 1.0
+    elif break_state == 1:
+        signal_bonus = 0.5
+    else:
+        signal_bonus = 0.0
+
+    price_position = 1.0 if (anchor is not None and close > anchor) else 0.0
+
+    score = (
+        breakout_strength * 50
+        + volume_score * 0.2
+        + signal_bonus * 20
+        + price_position * 10
+    )
+
+    return round(score, 3), breakout_strength
+
+
 def build_stock_result(symbol: str, last_row):
     anchor = float(last_row["anchor"]) if pd.notna(last_row["anchor"]) else None
     close = float(last_row["close"])
@@ -156,9 +183,13 @@ def build_stock_result(symbol: str, last_row):
     break_state = int(last_row["break_state"])
     signal = int(last_row["signal"])
 
-    strength = None
-    if anchor and anchor != 0:
-        strength = float((close - anchor) / anchor)
+    score, breakout_strength = calc_score(
+        close=close,
+        anchor=anchor,
+        volume=volume,
+        break_state=break_state,
+        signal=signal
+    )
 
     return {
         "symbol": symbol,
@@ -167,8 +198,9 @@ def build_stock_result(symbol: str, last_row):
         "anchor": anchor,
         "break_state": break_state,
         "signal": signal,
-        "strength": strength,
-        "reason": "已突破，等待回踩" if break_state == 1 else "已完成回踩訊號"
+        "strength": round(breakout_strength, 3) if breakout_strength is not None else None,
+        "score": score,
+        "reason": "已完成回踩訊號" if signal == 1 else "已突破，等待回踩"
     }
 
 
@@ -184,7 +216,6 @@ def run_post_market_scan():
             result_df = breakout_retest_strategy(df)
             last_row = result_df.iloc[-1]
 
-            # 先抓已突破待回踩 + 已完成訊號
             if int(last_row["break_state"]) in [1, 2]:
                 matched.append(build_stock_result(symbol, last_row))
 
@@ -193,11 +224,7 @@ def run_post_market_scan():
 
     matched = sorted(
         matched,
-        key=lambda x: (
-            x["signal"],
-            x["strength"] if x["strength"] is not None else -999,
-            x["volume"]
-        ),
+        key=lambda x: (x["score"], x["signal"], x["volume"]),
         reverse=True
     )
 
@@ -205,19 +232,29 @@ def run_post_market_scan():
 
 
 def analyze_stock_logic(symbol: str):
+    if not str(symbol).isdigit():
+        return {
+            "symbol": symbol,
+            "error": "symbol 格式錯誤，請輸入股票代號"
+        }
+
     df = get_price_data(symbol)
     result_df = breakout_retest_strategy(df)
     last_row = result_df.iloc[-1]
 
     close = float(last_row["close"])
     anchor = float(last_row["anchor"]) if pd.notna(last_row["anchor"]) else None
+    volume = int(last_row["volume"])
     break_state = int(last_row["break_state"])
     signal = int(last_row["signal"])
-    volume = int(last_row["volume"])
 
-    strength = None
-    if anchor and anchor != 0:
-        strength = float((close - anchor) / anchor)
+    score, breakout_strength = calc_score(
+        close=close,
+        anchor=anchor,
+        volume=volume,
+        break_state=break_state,
+        signal=signal
+    )
 
     if signal == 1:
         stage_text = "已完成回踩訊號"
@@ -233,14 +270,14 @@ def analyze_stock_logic(symbol: str):
         pros.append("股價已突破前高區")
     if signal == 1:
         pros.append("回踩後仍站回 anchor 之上")
-    if strength is not None and strength > 0:
-        pros.append("目前收盤仍高於 anchor")
+    if anchor is not None and close > anchor:
+        pros.append("目前價格仍高於 anchor")
     if volume > 0:
         pros.append("近期有量能資料可供追蹤")
 
     if break_state == 1 and signal == 0:
         risks.append("尚未完成回踩確認，可能是假突破")
-    if strength is not None and strength < 0.02:
+    if breakout_strength < 0.02:
         risks.append("突破幅度不大，後續容易震盪")
     if anchor is None:
         risks.append("目前尚無明確 anchor 可追蹤")
@@ -259,7 +296,8 @@ def analyze_stock_logic(symbol: str):
         "volume": volume,
         "break_state": break_state,
         "signal": signal,
-        "strength": strength,
+        "strength": round(breakout_strength, 3),
+        "score": score,
         "stage": stage_text,
         "pros": pros,
         "risks": risks,
@@ -297,4 +335,10 @@ def get_company(symbol: str):
 
 @app.post("/ai/analyze")
 def ai_analyze(req: AnalyzeRequest):
-    return analyze_stock_logic(req.symbol)
+    try:
+        return analyze_stock_logic(req.symbol)
+    except Exception as e:
+        return {
+            "symbol": req.symbol,
+            "error": str(e)
+        }
