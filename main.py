@@ -15,22 +15,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class AnalyzeRequest(BaseModel):
     symbol: str
-
 
 def load_symbols():
     with open("symbols.txt", "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
-
 
 def get_fugle_client():
     api_key = os.getenv("FUGLE_API_KEY")
     if not api_key:
         raise ValueError("未設定 FUGLE_API_KEY")
     return RestClient(api_key=api_key)
-
 
 def get_stock_realtime(symbol: str):
     client = get_fugle_client()
@@ -44,144 +40,79 @@ def get_stock_realtime(symbol: str):
         "quote": quote
     }
 
-
 def safe_get_close(data: dict):
-    quote = data.get("quote", {})
-    if quote.get("priceLast") is not None:
-        return float(quote["priceLast"])
-    if quote.get("closePrice") is not None:
-        return float(quote["closePrice"])
-    raise ValueError("取不到最新成交價")
-
+    q = data.get("quote", {})
+    if q.get("priceLast") is not None:
+        return float(q["priceLast"])
+    if q.get("closePrice") is not None:
+        return float(q["closePrice"])
+    raise ValueError("取不到成交價")
 
 def safe_get_volume(data: dict):
-    quote = data.get("quote", {})
-    if quote.get("tradeVolume") is not None:
-        return int(quote["tradeVolume"])
-    if quote.get("volume") is not None:
-        return int(quote["volume"])
+    q = data.get("quote", {})
+    if q.get("tradeVolume") is not None:
+        return int(q["tradeVolume"])
+    if q.get("volume") is not None:
+        return int(q["volume"])
     return 0
 
-
 def safe_get_open(data: dict):
-    quote = data.get("quote", {})
-    if quote.get("priceOpen") is not None:
-        return float(quote["priceOpen"])
+    q = data.get("quote", {})
+    if q.get("priceOpen") is not None:
+        return float(q["priceOpen"])
     return None
-
 
 def safe_get_high(data: dict):
-    quote = data.get("quote", {})
-    if quote.get("priceHigh") is not None:
-        return float(quote["priceHigh"])
+    q = data.get("quote", {})
+    if q.get("priceHigh") is not None:
+        return float(q["priceHigh"])
     return None
 
-
-def calc_realtime_score(close: float, open_price, high_price, volume: int):
-    change_strength = 0.0
-    intraday_position = 0.0
+def calc_score(close, open_price, high_price, volume):
+    strength = 0
+    position = 0
 
     if open_price and open_price != 0:
-        change_strength = (close - open_price) / open_price
+        strength = (close - open_price) / open_price
 
     if high_price and high_price != 0:
-        intraday_position = close / high_price
+        position = close / high_price
 
-    volume_score = volume / 1_000_000
+    vol_score = volume / 1_000_000
 
-    score = (
-        change_strength * 100
-        + intraday_position * 20
-        + volume_score * 0.2
-    )
+    score = strength * 100 + position * 20 + vol_score * 0.2
 
-    return round(score, 3), round(change_strength, 3)
-
-
-def build_stock_result(symbol: str, data: dict):
-    close = safe_get_close(data)
-    volume = safe_get_volume(data)
-    open_price = safe_get_open(data)
-    high_price = safe_get_high(data)
-
-    score, strength = calc_realtime_score(
-        close=close,
-        open_price=open_price,
-        high_price=high_price,
-        volume=volume
-    )
-
-    return {
-        "symbol": symbol,
-        "close": close,
-        "volume": volume,
-        "open": open_price,
-        "high": high_price,
-        "strength": strength,
-        "score": score,
-        "reason": "富果即時行情掃描"
-    }
-
-
-def run_post_market_scan():
-    symbols = load_symbols()
-    matched = []
-
-    for idx, symbol in enumerate(symbols, start=1):
-        try:
-            print(f"[{idx}/{len(symbols)}] scanning {symbol}")
-            data = get_stock_realtime(symbol)
-            matched.append(build_stock_result(symbol, data))
-        except Exception as e:
-            print(f"error: {symbol} - {e}")
-
-    matched = sorted(
-        matched,
-        key=lambda x: (x["score"], x["volume"]),
-        reverse=True
-    )
-
-    return matched
-
+    return round(score, 3), round(strength, 3)
 
 def analyze_stock_logic(symbol: str):
     if not str(symbol).isdigit():
-        return {
-            "symbol": symbol,
-            "error": "symbol 格式錯誤，請輸入股票代號"
-        }
+        return {"symbol": symbol, "error": "symbol錯誤"}
 
     data = get_stock_realtime(symbol)
+
     close = safe_get_close(data)
     volume = safe_get_volume(data)
     open_price = safe_get_open(data)
     high_price = safe_get_high(data)
 
-    score, strength = calc_realtime_score(
-        close=close,
-        open_price=open_price,
-        high_price=high_price,
-        volume=volume
-    )
+    score, strength = calc_score(close, open_price, high_price, volume)
 
     pros = []
     risks = []
 
-    if open_price is not None and close > open_price:
-        pros.append("現價高於開盤價，日內偏強")
-    if high_price is not None and close >= high_price * 0.98:
-        pros.append("目前價格接近日內高點")
+    if open_price and close > open_price:
+        pros.append("站上開盤價")
+    if high_price and close >= high_price * 0.98:
+        pros.append("接近日內高點")
     if volume > 0:
-        pros.append("有即時成交量可供追蹤")
+        pros.append("有量")
 
-    if open_price is not None and close < open_price:
-        risks.append("現價低於開盤價，日內轉弱風險存在")
-    if high_price is not None and close < high_price * 0.95:
-        risks.append("距離日內高點有明顯回落")
+    if open_price and close < open_price:
+        risks.append("跌破開盤")
+    if high_price and close < high_price * 0.95:
+        risks.append("回落")
     if volume == 0:
-        risks.append("成交量不足，判讀可靠度較低")
-
-    suggestion = "可列入觀察名單，搭配盤中量價變化再決定是否進一步追蹤。"
+        risks.append("無量")
 
     return {
         "symbol": symbol,
@@ -191,105 +122,75 @@ def analyze_stock_logic(symbol: str):
         "volume": volume,
         "strength": strength,
         "score": score,
-        "stage": "富果即時行情分析",
+        "stage": "即時分析",
         "pros": pros,
         "risks": risks,
-        "suggestion": suggestion
+        "suggestion": "觀察量價變化"
     }
 
-
-def analyze_stock_with_gemini(rule_result: dict):
+def analyze_stock_with_gemini(rule_result):
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return {"llm_analysis": "未設定 GEMINI_API_KEY"}
+        return {"llm_analysis": "未設定API KEY"}
 
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-你是一個台股短線技術分析助理。
-
 股票：{rule_result["symbol"]}
-目前價格：{rule_result["close"]}
-開盤價：{rule_result.get("open")}
-日內高點：{rule_result.get("high")}
+價格：{rule_result["close"]}
 成交量：{rule_result["volume"]}
 score：{rule_result["score"]}
-strength：{rule_result["strength"]}
-分析階段：{rule_result["stage"]}
 
-優點：
-{chr(10).join(rule_result["pros"]) if rule_result["pros"] else "無"}
-
-風險：
-{chr(10).join(rule_result["risks"]) if rule_result["risks"] else "無"}
-
-請用繁體中文、簡潔白話回答：
-1. 這檔目前強在哪
-2. 主要風險
-3. 接下來該怎麼觀察
+請用繁體中文簡單說：
+1. 強在哪
+2. 風險
+3. 建議
 """
 
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro"]
-    last_error = "未知錯誤"
+    models = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
-    for model_name in models_to_try:
+    for m in models:
         try:
-            response = client.models.generate_content(
-                model=model_name,
+            res = client.models.generate_content(
+                model=m,
                 contents=prompt
             )
-            return {"llm_analysis": response.text}
+            return {"llm_analysis": res.text, "model": m}
         except Exception as e:
-            last_error = str(e)
+            err = str(e)
 
-    return {"llm_analysis": f"AI 分析暫時無法使用：{last_error}"}
-
+    return {"llm_analysis": f"AI失敗:{err}"}
 
 @app.get("/")
 def root():
-    return {"message": "Stock app backend is running"}
-
+    return {"ok": True}
 
 @app.get("/scan")
-def scan_stocks():
-    results = run_post_market_scan()
-    return {
-        "count": len(results),
-        "results": results
-    }
+def scan():
+    symbols = load_symbols()
+    result = []
 
+    for s in symbols:
+        try:
+            data = analyze_stock_logic(s)
+            result.append(data)
+        except:
+            pass
 
-@app.get("/company/{symbol}")
-def get_company(symbol: str):
-    return {
-        "symbol": symbol,
-        "name": "示範公司",
-        "industry": "電子業",
-        "market": "上市/上櫃",
-        "capital": "待串真實資料",
-        "chairman": "待串真實資料",
-        "general_manager": "待串真實資料",
-        "description": "目前為公司基本資料 API 骨架。"
-    }
+    result = sorted(result, key=lambda x: x["score"], reverse=True)
 
+    return {"count": len(result), "data": result}
 
 @app.post("/ai/analyze")
-def ai_analyze(req: AnalyzeRequest):
+def ai(req: AnalyzeRequest):
     try:
-        rule_result = analyze_stock_logic(req.symbol)
+        r = analyze_stock_logic(req.symbol)
+        if "error" in r:
+            return r
 
-        if "error" in rule_result:
-            return rule_result
+        llm = analyze_stock_with_gemini(r)
 
-        llm = analyze_stock_with_gemini(rule_result)
-
-        return {
-            **rule_result,
-            **llm
-        }
+        return {**r, **llm}
 
     except Exception as e:
-        return {
-            "symbol": req.symbol,
-            "error": str(e)
-        }
+        return {"error": str(e)}
