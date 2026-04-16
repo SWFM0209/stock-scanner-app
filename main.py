@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import yfinance as yf
+import os
+from google import genai
 
 app = FastAPI()
 
@@ -230,7 +232,40 @@ def run_post_market_scan():
 
     return matched
 
+def analyze_stock_with_gemini(rule_result: dict):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {"llm_analysis": "未設定 GEMINI_API_KEY"}
 
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+你是一個台股短線技術分析助理。
+
+股票：{rule_result["symbol"]}
+價格：{rule_result["close"]}
+score：{rule_result["score"]}
+strength：{rule_result["strength"]}
+狀態：{rule_result["stage"]}
+
+優點：
+{chr(10).join(rule_result["pros"])}
+
+風險：
+{chr(10).join(rule_result["risks"])}
+
+請用簡單白話中文回答：
+1. 這檔在強什麼
+2. 有沒有風險
+3. 建議現在怎麼做
+"""
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+
+    return {"llm_analysis": response.text}
 def analyze_stock_logic(symbol: str):
     if not str(symbol).isdigit():
         return {
@@ -336,7 +371,23 @@ def get_company(symbol: str):
 @app.post("/ai/analyze")
 def ai_analyze(req: AnalyzeRequest):
     try:
-        return analyze_stock_logic(req.symbol)
+        rule_result = analyze_stock_logic(req.symbol)
+
+        if "error" in rule_result:
+            return rule_result
+
+        llm = analyze_stock_with_gemini(rule_result)
+
+        return {
+            **rule_result,
+            **llm
+        }
+
+    except Exception as e:
+        return {
+            "symbol": req.symbol,
+            "error": str(e)
+        }
     except Exception as e:
         return {
             "symbol": req.symbol,
