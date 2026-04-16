@@ -80,8 +80,6 @@
             box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
             background: #f9fbff;
         }
-        .stock-card.signal { border-left: 8px solid #ef4444; }
-        .stock-card.watch { border-left: 8px solid #f59e0b; }
         .stock-top {
             display: flex;
             justify-content: space-between;
@@ -161,11 +159,12 @@
             padding-left: 20px;
             line-height: 1.7;
         }
-        .suggestion {
+        .suggestion, .llm-box {
             background: #f8fafc;
             padding: 14px;
             border-radius: 12px;
             line-height: 1.7;
+            white-space: pre-wrap;
         }
         .loading {
             color: #2563eb;
@@ -174,6 +173,11 @@
         .error {
             color: #dc2626;
             font-weight: 700;
+        }
+        .muted {
+            color: #6b7280;
+            font-size: 12px;
+            margin-top: 8px;
         }
         @media (max-width: 900px) {
             .layout { grid-template-columns: 1fr; }
@@ -192,7 +196,7 @@
 <div class="container">
     <div class="header">
         <div class="title">📈 Stock Scanner</div>
-        <div class="subtitle">Breakout Retest 強勢股掃描與 AI 分析</div>
+        <div class="subtitle">富果即時行情 + AI 分析</div>
         <div class="toolbar">
             <button onclick="loadScan()">🔍 掃描股票</button>
         </div>
@@ -224,44 +228,46 @@ async function loadScan() {
         const res = await fetch(API_BASE + "/scan");
         const data = await res.json();
 
-        data.results.sort((a, b) => Number(b.score ?? -999) - Number(a.score ?? -999));
+        const rows = data.data || [];
 
-        if (!data.results || data.results.length === 0) {
-            list.innerHTML = '<div class="analysis-empty">目前沒有符合條件的股票。</div>';
+        rows.sort((a, b) => Number(b.score ?? -999) - Number(a.score ?? -999));
+
+        if (!rows.length) {
+            list.innerHTML = '<div class="analysis-empty">目前沒有資料。</div>';
             return;
         }
 
         list.innerHTML = "";
 
-        data.results.forEach(stock => {
+        rows.forEach(stock => {
             const div = document.createElement("div");
-            div.className = "stock-card " + (Number(stock.signal) === 1 ? "signal" : "watch");
+            div.className = "stock-card";
 
             div.innerHTML = `
                 <div class="stock-top">
                     <div class="symbol">${stock.symbol}</div>
-                    <div class="reason-badge">${stock.reason}</div>
+                    <div class="reason-badge">${stock.stage || stock.reason || "即時分析"}</div>
                 </div>
                 <div class="stock-grid">
                     <div class="metric">
                         <div class="metric-label">分數</div>
-                        <div class="metric-value">${Number(stock.score).toFixed(3)}</div>
+                        <div class="metric-value">${Number(stock.score ?? 0).toFixed(3)}</div>
                     </div>
                     <div class="metric">
                         <div class="metric-label">價格</div>
-                        <div class="metric-value">${Number(stock.close).toFixed(2)}</div>
+                        <div class="metric-value">${Number(stock.close ?? 0).toFixed(2)}</div>
                     </div>
                     <div class="metric">
                         <div class="metric-label">強度</div>
-                        <div class="metric-value">${stock.strength !== null ? Number(stock.strength).toFixed(3) : "N/A"}</div>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-label">狀態</div>
-                        <div class="metric-value">${stock.break_state}</div>
+                        <div class="metric-value">${Number(stock.strength ?? 0).toFixed(3)}</div>
                     </div>
                     <div class="metric">
                         <div class="metric-label">成交量</div>
-                        <div class="metric-value">${Number(stock.volume).toLocaleString()}</div>
+                        <div class="metric-value">${Number(stock.volume ?? 0).toLocaleString()}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">開盤 / 高點</div>
+                        <div class="metric-value">${stock.open ?? "—"} / ${stock.high ?? "—"}</div>
                     </div>
                 </div>
             `;
@@ -300,25 +306,25 @@ async function loadAnalysis(symbol) {
         analysis.innerHTML = `
             <div class="analysis-head">
                 <div class="analysis-symbol">${data.symbol}</div>
-                <div class="analysis-stage">${data.stage}</div>
+                <div class="analysis-stage">${data.stage || "即時分析"}</div>
             </div>
 
             <div class="analysis-metrics">
                 <div class="metric">
                     <div class="metric-label">分數</div>
-                    <div class="metric-value">${Number(data.score).toFixed(3)}</div>
+                    <div class="metric-value">${Number(data.score ?? 0).toFixed(3)}</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">目前價格</div>
-                    <div class="metric-value">${data.close}</div>
+                    <div class="metric-value">${data.close ?? "—"}</div>
                 </div>
                 <div class="metric">
-                    <div class="metric-label">Anchor</div>
-                    <div class="metric-value">${data.anchor ?? "N/A"}</div>
+                    <div class="metric-label">開盤價</div>
+                    <div class="metric-value">${data.open ?? "—"}</div>
                 </div>
                 <div class="metric">
-                    <div class="metric-label">強度</div>
-                    <div class="metric-value">${data.strength ?? "N/A"}</div>
+                    <div class="metric-label">日內高點</div>
+                    <div class="metric-value">${data.high ?? "—"}</div>
                 </div>
             </div>
 
@@ -334,7 +340,13 @@ async function loadAnalysis(symbol) {
 
             <div class="section">
                 <h3>建議</h3>
-                <div class="suggestion">${data.suggestion}</div>
+                <div class="suggestion">${data.suggestion ?? "—"}</div>
+            </div>
+
+            <div class="section">
+                <h3>AI 分析</h3>
+                <div class="llm-box">${data.llm_analysis ?? "目前沒有 AI 分析"}</div>
+                <div class="muted">模型：${data.llm_model ?? "unknown"}</div>
             </div>
         `;
     } catch (err) {
