@@ -104,7 +104,7 @@
         }
         .stock-grid {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 10px;
         }
         .metric {
@@ -147,7 +147,7 @@
         }
         .analysis-metrics {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 12px;
             margin-bottom: 18px;
         }
@@ -178,10 +178,11 @@
         @media (max-width: 900px) {
             .layout { grid-template-columns: 1fr; }
             .stock-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .analysis-metrics { grid-template-columns: 1fr; }
+            .analysis-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         @media (max-width: 520px) {
             .stock-grid { grid-template-columns: 1fr; }
+            .analysis-metrics { grid-template-columns: 1fr; }
             .title { font-size: 26px; }
             .symbol { font-size: 20px; }
         }
@@ -223,11 +224,7 @@ async function loadScan() {
         const res = await fetch(API_BASE + "/scan");
         const data = await res.json();
 
-        data.results.sort((a, b) => {
-            const signalDiff = Number(b.signal) - Number(a.signal);
-            if (signalDiff !== 0) return signalDiff;
-            return Number(b.strength ?? -999) - Number(a.strength ?? -999);
-        });
+        data.results.sort((a, b) => Number(b.score ?? -999) - Number(a.score ?? -999));
 
         if (!data.results || data.results.length === 0) {
             list.innerHTML = '<div class="analysis-empty">目前沒有符合條件的股票。</div>';
@@ -246,6 +243,10 @@ async function loadScan() {
                     <div class="reason-badge">${stock.reason}</div>
                 </div>
                 <div class="stock-grid">
+                    <div class="metric">
+                        <div class="metric-label">分數</div>
+                        <div class="metric-value">${Number(stock.score).toFixed(3)}</div>
+                    </div>
                     <div class="metric">
                         <div class="metric-label">價格</div>
                         <div class="metric-value">${Number(stock.close).toFixed(2)}</div>
@@ -303,6 +304,10 @@ async function loadAnalysis(symbol) {
             </div>
 
             <div class="analysis-metrics">
+                <div class="metric">
+                    <div class="metric-label">分數</div>
+                    <div class="metric-value">${Number(data.score).toFixed(3)}</div>
+                </div>
                 <div class="metric">
                     <div class="metric-label">目前價格</div>
                     <div class="metric-value">${data.close}</div>
