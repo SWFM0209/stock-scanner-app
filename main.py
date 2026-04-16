@@ -167,7 +167,7 @@ def analyze_stock_with_gemini(rule_result):
 
     return {
         "llm_analysis": make_local_ai_text(rule_result),
-        "llm_model": f"fallback:{last_error}"
+        "llm_model": "local-fallback"
     }
 
 
