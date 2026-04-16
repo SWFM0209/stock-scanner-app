@@ -200,7 +200,7 @@ def build_stock_result(symbol: str, last_row):
         "anchor": anchor,
         "break_state": break_state,
         "signal": signal,
-        "strength": round(breakout_strength, 3) if breakout_strength is not None else None,
+        "strength": round(breakout_strength, 3),
         "score": score,
         "reason": "已完成回踩訊號" if signal == 1 else "已突破，等待回踩"
     }
@@ -232,40 +232,7 @@ def run_post_market_scan():
 
     return matched
 
-def analyze_stock_with_gemini(rule_result: dict):
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return {"llm_analysis": "未設定 GEMINI_API_KEY"}
 
-    client = genai.Client(api_key=api_key)
-
-    prompt = f"""
-你是一個台股短線技術分析助理。
-
-股票：{rule_result["symbol"]}
-價格：{rule_result["close"]}
-score：{rule_result["score"]}
-strength：{rule_result["strength"]}
-狀態：{rule_result["stage"]}
-
-優點：
-{chr(10).join(rule_result["pros"])}
-
-風險：
-{chr(10).join(rule_result["risks"])}
-
-請用簡單白話中文回答：
-1. 這檔在強什麼
-2. 有沒有風險
-3. 建議現在怎麼做
-"""
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-
-    return {"llm_analysis": response.text}
 def analyze_stock_logic(symbol: str):
     if not str(symbol).isdigit():
         return {
@@ -340,6 +307,44 @@ def analyze_stock_logic(symbol: str):
     }
 
 
+def analyze_stock_with_gemini(rule_result: dict):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {"llm_analysis": "未設定 GEMINI_API_KEY"}
+
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+你是一個台股短線技術分析助理。
+
+股票：{rule_result["symbol"]}
+價格：{rule_result["close"]}
+score：{rule_result["score"]}
+strength：{rule_result["strength"]}
+狀態：{rule_result["stage"]}
+
+優點：
+{chr(10).join(rule_result["pros"])}
+
+風險：
+{chr(10).join(rule_result["risks"])}
+
+請用繁體中文、簡單白話回答：
+1. 這檔在強什麼
+2. 有沒有風險
+3. 建議現在怎麼做
+
+請簡潔、像真的分析師，不要太空泛。
+"""
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+
+    return {"llm_analysis": response.text}
+
+
 @app.get("/")
 def root():
     return {"message": "Stock app backend is running"}
@@ -383,11 +388,6 @@ def ai_analyze(req: AnalyzeRequest):
             **llm
         }
 
-    except Exception as e:
-        return {
-            "symbol": req.symbol,
-            "error": str(e)
-        }
     except Exception as e:
         return {
             "symbol": req.symbol,
