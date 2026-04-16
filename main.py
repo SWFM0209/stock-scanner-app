@@ -31,6 +31,7 @@ def get_fugle_client():
         raise ValueError("未設定 FUGLE_API_KEY")
     return RestClient(api_key=api_key)
 
+
 def get_stock_realtime(symbol: str):
     client = get_fugle_client()
     stock = client.stock
@@ -43,10 +44,27 @@ def get_stock_realtime(symbol: str):
         "quote": quote
     }
 
-    print("FUGLE DATA:", data)
+    # 日K fallback：補 open / high / volume
+    # 若 SDK 版本或帳號權限不支援，會自動略過，不影響主流程
+    try:
+        candles = stock.historical.candles(
+            symbol=symbol,
+            timeframe="D",
+            limit=1
+        )
 
+        if candles and len(candles) > 0:
+            latest = candles[-1]
+            data["daily"] = {
+                "open": latest.get("open"),
+                "high": latest.get("high"),
+                "volume": latest.get("volume")
+            }
+    except Exception as e:
+        print("Daily fallback error:", e)
+
+    print("FUGLE DATA:", data)
     return data
-    }
 
 
 def safe_get_close(data: dict):
@@ -58,27 +76,35 @@ def safe_get_close(data: dict):
     raise ValueError("取不到成交價")
 
 
-def safe_get_volume(data):
+def safe_get_volume(data: dict):
     q = data.get("quote", {})
+    d = data.get("daily", {})
     return (
         q.get("tradeVolume")
         or q.get("volume")
+        or d.get("volume")
         or 0
     )
 
-def safe_get_open(data):
+
+def safe_get_open(data: dict):
     q = data.get("quote", {})
+    d = data.get("daily", {})
     return (
         q.get("priceOpen")
         or q.get("openPrice")
+        or d.get("open")
         or None
     )
 
-def safe_get_high(data):
+
+def safe_get_high(data: dict):
     q = data.get("quote", {})
+    d = data.get("daily", {})
     return (
         q.get("priceHigh")
         or q.get("highPrice")
+        or d.get("high")
         or None
     )
 
@@ -94,7 +120,6 @@ def calc_score(close, open_price, high_price, volume):
         position = close / high_price
 
     vol_score = volume / 1_000_000
-
     score = strength * 100 + position * 20 + vol_score * 0.2
 
     return round(score, 3), round(strength, 3)
@@ -142,6 +167,8 @@ def analyze_stock_with_gemini(rule_result):
 
 股票代號：{rule_result["symbol"]}
 目前價格：{rule_result["close"]}
+開盤價：{rule_result["open"]}
+日內高點：{rule_result["high"]}
 成交量：{rule_result["volume"]}
 強度（strength）：{rule_result["strength"]}
 綜合評分（score）：{rule_result["score"]}
@@ -155,7 +182,6 @@ def analyze_stock_with_gemini(rule_result):
 """
 
     models = ["gemini-2.5-flash", "gemini-2.0-flash"]
-    last_error = "未知錯誤"
 
     for m in models:
         try:
@@ -169,7 +195,7 @@ def analyze_stock_with_gemini(rule_result):
                 "llm_model": m
             }
         except Exception as e:
-            last_error = str(e)
+            print(f"Gemini model {m} failed:", e)
 
     return {
         "llm_analysis": make_local_ai_text(rule_result),
