@@ -54,27 +54,29 @@ def safe_get_close(data: dict):
     raise ValueError("取不到成交價")
 
 
-def safe_get_volume(data: dict):
+def safe_get_volume(data):
     q = data.get("quote", {})
-    if q.get("tradeVolume") is not None:
-        return int(q["tradeVolume"])
-    if q.get("volume") is not None:
-        return int(q["volume"])
-    return 0
+    return (
+        q.get("tradeVolume")
+        or q.get("volume")
+        or 0
+    )
 
-
-def safe_get_open(data: dict):
+def safe_get_open(data):
     q = data.get("quote", {})
-    if q.get("priceOpen") is not None:
-        return float(q["priceOpen"])
-    return None
+    return (
+        q.get("priceOpen")
+        or q.get("openPrice")
+        or None
+    )
 
-
-def safe_get_high(data: dict):
+def safe_get_high(data):
     q = data.get("quote", {})
-    if q.get("priceHigh") is not None:
-        return float(q["priceHigh"])
-    return None
+    return (
+        q.get("priceHigh")
+        or q.get("highPrice")
+        or None
+    )
 
 
 def calc_score(close, open_price, high_price, volume):
