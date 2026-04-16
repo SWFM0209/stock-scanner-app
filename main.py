@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import os
 from google import genai
 from fugle_marketdata import RestClient
+import yfinance as yf
 
 app = FastAPI()
 
@@ -44,27 +45,34 @@ def get_stock_realtime(symbol: str):
         "quote": quote
     }
 
-    # 日K fallback：補 open / high / volume
-    # 若 SDK 版本或帳號權限不支援，會自動略過，不影響主流程
-    try:
-        candles = stock.historical.candles(
-            symbol=symbol,
-            timeframe="D",
-            limit=1
-        )
-
-        if candles and len(candles) > 0:
-            latest = candles[-1]
-            data["daily"] = {
-                "open": latest.get("open"),
-                "high": latest.get("high"),
-                "volume": latest.get("volume")
-            }
-    except Exception as e:
-        print("Daily fallback error:", e)
-
     print("FUGLE DATA:", data)
     return data
+
+
+def get_volume_from_yfinance(symbol: str):
+    try:
+        tw = f"{symbol}.TW"
+        otc = f"{symbol}.TWO"
+
+        df = yf.download(tw, period="1d", interval="1d", progress=False, auto_adjust=False)
+
+        if df.empty:
+            df = yf.download(otc, period="1d", interval="1d", progress=False, auto_adjust=False)
+
+        if not df.empty:
+            if "Volume" in df.columns:
+                return int(df["Volume"].iloc[-1])
+
+            # MultiIndex fallback
+            if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+                vol_col = [c for c in df.columns if c[0] == "Volume"]
+                if vol_col:
+                    return int(df[vol_col[0]].iloc[-1])
+
+    except Exception as e:
+        print("yfinance volume error:", e)
+
+    return 0
 
 
 def safe_get_close(data: dict):
@@ -76,37 +84,37 @@ def safe_get_close(data: dict):
     raise ValueError("取不到成交價")
 
 
-def safe_get_volume(data: dict):
-    q = data.get("quote", {})
-    d = data.get("daily", {})
-    return (
-        q.get("tradeVolume")
-        or q.get("volume")
-        or d.get("volume")
-        or 0
-    )
-
-
 def safe_get_open(data: dict):
     q = data.get("quote", {})
-    d = data.get("daily", {})
     return (
         q.get("priceOpen")
         or q.get("openPrice")
-        or d.get("open")
         or None
     )
 
 
 def safe_get_high(data: dict):
     q = data.get("quote", {})
-    d = data.get("daily", {})
     return (
         q.get("priceHigh")
         or q.get("highPrice")
-        or d.get("high")
         or None
     )
+
+
+def safe_get_volume(data: dict, symbol: str):
+    q = data.get("quote", {})
+
+    vol = (
+        q.get("tradeVolume")
+        or q.get("volume")
+        or 0
+    )
+
+    if vol == 0:
+        vol = get_volume_from_yfinance(symbol)
+
+    return int(vol)
 
 
 def calc_score(close, open_price, high_price, volume):
@@ -210,9 +218,9 @@ def analyze_stock_logic(symbol: str):
     data = get_stock_realtime(symbol)
 
     close = safe_get_close(data)
-    volume = safe_get_volume(data)
     open_price = safe_get_open(data)
     high_price = safe_get_high(data)
+    volume = safe_get_volume(data, symbol)
 
     score, strength = calc_score(close, open_price, high_price, volume)
 
