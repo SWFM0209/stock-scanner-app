@@ -4,7 +4,6 @@ from pydantic import BaseModel
 import os
 from google import genai
 from fugle_marketdata import RestClient
-import yfinance as yf
 
 app = FastAPI()
 
@@ -33,86 +32,87 @@ def get_fugle_client():
     return RestClient(api_key=api_key)
 
 
-def get_stock_realtime(symbol: str):
+def get_stock_data(symbol: str):
     client = get_fugle_client()
     stock = client.stock
 
-    ticker = stock.intraday.ticker(symbol=symbol)
-    quote = stock.intraday.quote(symbol=symbol)
+    ticker = {}
+    quote = {}
+    stats = {}
+
+    try:
+        ticker = stock.intraday.ticker(symbol=symbol)
+    except Exception as e:
+        print(f"ticker error {symbol}: {e}")
+
+    try:
+        quote = stock.intraday.quote(symbol=symbol)
+    except Exception as e:
+        print(f"quote error {symbol}: {e}")
+
+    try:
+        stats = stock.historical.stats(symbol=symbol)
+    except Exception as e:
+        print(f"stats error {symbol}: {e}")
 
     data = {
-        "ticker": ticker,
-        "quote": quote
+        "ticker": ticker or {},
+        "quote": quote or {},
+        "stats": stats or {}
     }
 
     print("FUGLE DATA:", data)
     return data
 
 
-def get_volume_from_yfinance(symbol: str):
-    try:
-        tw = f"{symbol}.TW"
-        otc = f"{symbol}.TWO"
-
-        df = yf.download(tw, period="1d", interval="1d", progress=False, auto_adjust=False)
-
-        if df.empty:
-            df = yf.download(otc, period="1d", interval="1d", progress=False, auto_adjust=False)
-
-        if not df.empty:
-            if "Volume" in df.columns:
-                return int(df["Volume"].iloc[-1])
-
-            # MultiIndex fallback
-            if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
-                vol_col = [c for c in df.columns if c[0] == "Volume"]
-                if vol_col:
-                    return int(df[vol_col[0]].iloc[-1])
-
-    except Exception as e:
-        print("yfinance volume error:", e)
-
-    return 0
-
-
 def safe_get_close(data: dict):
     q = data.get("quote", {})
+    s = data.get("stats", {})
+
     if q.get("priceLast") is not None:
         return float(q["priceLast"])
     if q.get("closePrice") is not None:
         return float(q["closePrice"])
+    if s.get("closePrice") is not None:
+        return float(s["closePrice"])
+
     raise ValueError("取不到成交價")
 
 
 def safe_get_open(data: dict):
     q = data.get("quote", {})
+    s = data.get("stats", {})
+
     return (
         q.get("priceOpen")
         or q.get("openPrice")
+        or s.get("openPrice")
         or None
     )
 
 
 def safe_get_high(data: dict):
     q = data.get("quote", {})
+    s = data.get("stats", {})
+
     return (
         q.get("priceHigh")
         or q.get("highPrice")
+        or s.get("highPrice")
         or None
     )
 
 
-def safe_get_volume(data: dict, symbol: str):
+def safe_get_volume(data: dict):
     q = data.get("quote", {})
+    s = data.get("stats", {})
 
     vol = (
         q.get("tradeVolume")
         or q.get("volume")
+        or s.get("tradeVolume")
         or 0
     )
-
-    if vol == 0:
-        vol = get_volume_from_yfinance(symbol)
 
     return int(vol)
 
@@ -135,7 +135,6 @@ def calc_score(close, open_price, high_price, volume):
 
 def make_local_ai_text(rule_result):
     lines = []
-
     lines.append(
         f"• {rule_result['symbol']} 目前分數為 {rule_result['score']}，強度為 {rule_result['strength']}。"
     )
@@ -156,7 +155,6 @@ def make_local_ai_text(rule_result):
         lines.append("• 明顯風險不多，但仍需留意盤中波動。")
 
     lines.append("• 建議：先觀察是否續強，再決定是否進一步追蹤。")
-
     return "\n".join(lines)
 
 
@@ -215,12 +213,12 @@ def analyze_stock_logic(symbol: str):
     if not str(symbol).isdigit():
         return {"symbol": symbol, "error": "symbol錯誤"}
 
-    data = get_stock_realtime(symbol)
+    data = get_stock_data(symbol)
 
     close = safe_get_close(data)
     open_price = safe_get_open(data)
     high_price = safe_get_high(data)
-    volume = safe_get_volume(data, symbol)
+    volume = safe_get_volume(data)
 
     score, strength = calc_score(close, open_price, high_price, volume)
 
@@ -274,7 +272,6 @@ def scan():
             print(f"scan error {s}: {e}")
 
     result = sorted(result, key=lambda x: x["score"], reverse=True)
-
     return {"count": len(result), "data": result}
 
 
@@ -300,7 +297,6 @@ def ai(req: AnalyzeRequest):
             return r
 
         llm = analyze_stock_with_gemini(r)
-
         return {**r, **llm}
 
     except Exception as e:
