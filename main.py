@@ -1,377 +1,155 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import os
-from google import genai
-from fugle_marketdata import RestClient
-
-app = FastAPI()
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>台股掃描器</title>
+
+<style>
+body {
+  font-family: "Microsoft JhengHei";
+  background: #0f172a;
+  color: white;
+  padding: 20px;
+}
+
+button {
+  padding: 10px 16px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.card {
+  background: #1e293b;
+  padding: 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.right {
+  float: right;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>台股掃描器</h1>
+
+<button onclick="scan()">掃描股票</button>
+
+<h2 id="status"></h2>
+
+<div style="display:flex; gap:20px; margin-top:20px">
+
+<div style="width:50%">
+<h3>掃描結果</h3>
+<div id="list"></div>
+</div>
+
+<div style="width:50%">
+<h3>AI 分析</h3>
+<div id="detail"></div>
+</div>
+
+</div>
+
+<script>
+
+const API_BASE = "https://stock-scanner-apiz.onrender.com";
+
+// 股票中文名稱
+const stockNames = {
+  "2330":"台積電",
+  "2317":"鴻海",
+  "2454":"聯發科",
+  "2303":"聯電",
+  "2603":"長榮",
+  "2882":"國泰金",
+  "2891":"中信金",
+  "2408":"南亞科",
+  "2308":"台達電",
+  "3231":"緯創",
+  "3481":"群創",
+  "2409":"友達",
+  "2301":"光寶科",
+  "2357":"華碩",
+  "2382":"廣達",
+  "2379":"瑞昱",
+  "6669":"緯穎",
+  "3034":"聯詠",
+  "3711":"日月光",
+  "2881":"富邦金"
+};
+
+let data = [];
+
+async function scan() {
+  document.getElementById("status").innerText = "掃描中...";
+
+  try {
+    const res = await fetch(API_BASE + "/scan");
+    const json = await res.json();
+
+    data = json.data;
+
+    renderList();
+
+    document.getElementById("status").innerText = "完成";
+  } catch (e) {
+    document.getElementById("status").innerText = "掃描失敗";
+  }
+}
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+function renderList() {
+  const list = document.getElementById("list");
 
+  list.innerHTML = "";
 
-class AnalyzeRequest(BaseModel):
-    symbol: str
+  data.forEach(s => {
 
-
-def load_symbols():
-    if not os.path.exists("symbols.txt"):
-        print("symbols.txt 不存在")
-        return []
+    const name = stockNames[s.symbol] || "";
 
-    with open("symbols.txt", "r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
-
+    const div = document.createElement("div");
+    div.className = "card";
 
-def get_fugle_client():
-    api_key = os.getenv("FUGLE_API_KEY")
-    if not api_key:
-        raise ValueError("未設定 FUGLE_API_KEY")
-    return RestClient(api_key=api_key)
+    div.innerHTML = `
+      <b>${name} (${s.symbol})</b>
+      <span class="right">${s.score}</span><br>
+      價格: ${s.close} | 量: ${s.volume}
+    `;
 
+    div.onclick = () => analyze(s.symbol);
 
-def get_stock_data(symbol: str):
-    client = get_fugle_client()
-    stock = client.stock
-
-    ticker = {}
-    quote = {}
-    stats = {}
-
-    try:
-        ticker = stock.intraday.ticker(symbol=symbol)
-    except Exception as e:
-        print(f"ticker error {symbol}: {e}")
-
-    try:
-        quote = stock.intraday.quote(symbol=symbol)
-    except Exception as e:
-        print(f"quote error {symbol}: {e}")
+    list.appendChild(div);
+  });
+}
 
-    try:
-        stats = stock.historical.stats(symbol=symbol)
-    except Exception as e:
-        print(f"stats error {symbol}: {e}")
+async function analyze(symbol) {
+  document.getElementById("detail").innerText = "分析中...";
 
-    data = {
-        "ticker": ticker or {},
-        "quote": quote or {},
-        "stats": stats or {}
-    }
-
-    print("QUOTE:", quote)
-    print("STATS:", stats)
-    print("TICKER:", ticker)
-
-    return data
-
-
-def safe_get_name(data: dict, symbol: str):
-    q = data.get("quote", {})
-    s = data.get("stats", {})
-    t = data.get("ticker", {})
-
-    name = (
-        t.get("name")
-        or t.get("symbolName")
-        or t.get("shortName")
-        or q.get("name")
-        or q.get("symbolName")
-        or s.get("name")
-        or s.get("symbolName")
-    )
+  try {
+    const res = await fetch(API_BASE + "/ai/analyze", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ symbol })
+    });
 
-    return name or symbol
+    const json = await res.json();
 
+    document.getElementById("detail").innerText =
+      json.llm_analysis || "無分析";
 
-def safe_get_close(data: dict):
-    q = data.get("quote", {})
-    s = data.get("stats", {})
-    t = data.get("ticker", {})
+  } catch(e) {
+    document.getElementById("detail").innerText = "分析失敗";
+  }
+}
 
-    val = (
-        q.get("priceLast")
-        or q.get("closePrice")
-        or s.get("closePrice")
-        or t.get("closePrice")
-    )
+</script>
 
-    if val is None:
-        raise ValueError("取不到成交價")
-
-    return float(val)
-
-
-def safe_get_open(data: dict):
-    q = data.get("quote", {})
-    s = data.get("stats", {})
-    t = data.get("ticker", {})
-
-    val = (
-        q.get("priceOpen")
-        or q.get("openPrice")
-        or s.get("openPrice")
-        or t.get("openPrice")
-    )
-
-    if val is None:
-        return None
-
-    try:
-        return float(val)
-    except Exception:
-        return None
-
-
-def safe_get_high(data: dict):
-    q = data.get("quote", {})
-    s = data.get("stats", {})
-    t = data.get("ticker", {})
-
-    val = (
-        q.get("priceHigh")
-        or q.get("highPrice")
-        or s.get("highPrice")
-        or t.get("highPrice")
-    )
-
-    if val is None:
-        return None
-
-    try:
-        return float(val)
-    except Exception:
-        return None
-
-
-def safe_get_volume(data: dict):
-    q = data.get("quote", {})
-    s = data.get("stats", {})
-    t = data.get("ticker", {})
-
-    vol = (
-        q.get("tradeVolume")
-        or q.get("volume")
-        or s.get("tradeVolume")
-        or s.get("volume")
-        or t.get("tradeVolume")
-        or t.get("volume")
-    )
-
-    if vol is None:
-        return 0
-
-    try:
-        return int(vol)
-    except Exception:
-        return 0
-
-
-def calc_score(close, open_price, high_price, volume):
-    strength = 0.0
-    position = 0.0
-
-    if open_price and open_price != 0:
-        strength = (close - open_price) / open_price
-
-    if high_price and high_price != 0:
-        position = close / high_price
-
-    vol_score = volume / 1_000_000
-    score = strength * 100 + position * 20 + vol_score * 0.2
-
-    return round(score, 3), round(strength, 3)
-
-
-def make_local_ai_text(rule_result):
-    lines = []
-
-    lines.append(
-        f"• {rule_result['symbol']} {rule_result.get('name', '')} 目前分數為 {rule_result['score']}，強度為 {rule_result['strength']}。"
-    )
-
-    if rule_result["strength"] > 0:
-        lines.append("• 現價相對偏強，屬於盤中仍有動能的型態。")
-    else:
-        lines.append("• 目前動能不明顯，需保守看待。")
-
-    if rule_result["volume"] and rule_result["volume"] > 0:
-        lines.append("• 有成交量可供追蹤，後續可觀察量價是否同步。")
-    else:
-        lines.append("• 目前量能資訊偏弱，判讀可靠度較低。")
-
-    if rule_result["risks"]:
-        lines.append("• 主要風險：" + "、".join(rule_result["risks"]))
-    else:
-        lines.append("• 明顯風險不多，但仍需留意盤中波動。")
-
-    lines.append("• 建議：先觀察是否續強，再決定是否進一步追蹤。")
-    return "\n".join(lines)
-
-
-def analyze_stock_with_gemini(rule_result):
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return {
-            "llm_analysis": make_local_ai_text(rule_result),
-            "llm_model": "local-fallback-no-key"
-        }
-
-    client = genai.Client(api_key=api_key)
-
-    prompt = f"""
-你是一個台股短線交易分析助理。
-
-請全部使用繁體中文，不要使用英文，不要加客套開頭。
-
-股票代號：{rule_result["symbol"]}
-股票名稱：{rule_result.get("name", "")}
-目前價格：{rule_result["close"]}
-開盤價：{rule_result["open"]}
-日內高點：{rule_result["high"]}
-成交量：{rule_result["volume"]}
-強度（strength）：{rule_result["strength"]}
-綜合評分（score）：{rule_result["score"]}
-
-請用以下格式輸出：
-
-【強勢原因】
-- ...
-
-【風險】
-- ...
-
-【操作建議】
-- ...
-"""
-
-    models = ["gemini-2.5-flash", "gemini-2.0-flash"]
-
-    for m in models:
-        try:
-            res = client.models.generate_content(
-                model=m,
-                contents=prompt
-            )
-            text = res.text if hasattr(res, "text") and res.text else str(res)
-            return {
-                "llm_analysis": text,
-                "llm_model": m
-            }
-        except Exception as e:
-            print(f"Gemini model {m} failed:", e)
-
-    return {
-        "llm_analysis": make_local_ai_text(rule_result),
-        "llm_model": "local-fallback"
-    }
-
-
-def analyze_stock_logic(symbol: str):
-    if not str(symbol).isdigit():
-        return {"symbol": symbol, "error": "symbol錯誤"}
-
-    data = get_stock_data(symbol)
-
-    name = safe_get_name(data, symbol)
-    close = safe_get_close(data)
-    open_price = safe_get_open(data)
-    high_price = safe_get_high(data)
-    volume = safe_get_volume(data)
-
-    score, strength = calc_score(close, open_price, high_price, volume)
-
-    pros = []
-    risks = []
-
-    if open_price and close > open_price:
-        pros.append("站上開盤價")
-    if high_price and close >= high_price * 0.98:
-        pros.append("接近日內高點")
-    if volume > 0:
-        pros.append("有量")
-
-    if open_price and close < open_price:
-        risks.append("跌破開盤")
-    if high_price and close < high_price * 0.95:
-        risks.append("回落")
-    if volume == 0:
-        risks.append("無量")
-
-    return {
-        "symbol": symbol,
-        "name": name,
-        "close": close,
-        "open": open_price,
-        "high": high_price,
-        "volume": volume,
-        "strength": strength,
-        "score": score,
-        "stage": "即時分析",
-        "pros": pros,
-        "risks": risks,
-        "suggestion": "觀察量價變化"
-    }
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.get("/")
-def root():
-    return {"ok": True}
-
-
-@app.get("/scan")
-def scan():
-    try:
-        symbols = load_symbols()
-        result = []
-
-        for s in symbols:
-            try:
-                data = analyze_stock_logic(s)
-                result.append(data)
-            except Exception as e:
-                print(f"scan error {s}: {e}")
-
-        result = sorted(result, key=lambda x: x["score"], reverse=True)
-        return {"count": len(result), "data": result}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/company/{symbol}")
-def get_company(symbol: str):
-    return {
-        "symbol": symbol,
-        "name": "示範公司",
-        "industry": "電子業",
-        "market": "上市/上櫃",
-        "capital": "待串真實資料",
-        "chairman": "待串真實資料",
-        "general_manager": "待串真實資料",
-        "description": "目前為公司基本資料 API 骨架。"
-    }
-
-
-@app.post("/ai/analyze")
-def ai(req: AnalyzeRequest):
-    try:
-        r = analyze_stock_logic(req.symbol)
-        if "error" in r:
-            return r
-
-        llm = analyze_stock_with_gemini(r)
-        return {**r, **llm}
-
-    except Exception as e:
-        return {"error": str(e)}
+</body>
+</html>
