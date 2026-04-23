@@ -72,6 +72,24 @@ def get_stock_data(symbol: str):
     return data
 
 
+def safe_get_name(data: dict, symbol: str):
+    q = data.get("quote", {})
+    s = data.get("stats", {})
+    t = data.get("ticker", {})
+
+    name = (
+        t.get("name")
+        or t.get("symbolName")
+        or t.get("shortName")
+        or q.get("name")
+        or q.get("symbolName")
+        or s.get("name")
+        or s.get("symbolName")
+    )
+
+    return name or symbol
+
+
 def safe_get_close(data: dict):
     q = data.get("quote", {})
     s = data.get("stats", {})
@@ -175,7 +193,7 @@ def make_local_ai_text(rule_result):
     lines = []
 
     lines.append(
-        f"• {rule_result['symbol']} 目前分數為 {rule_result['score']}，強度為 {rule_result['strength']}。"
+        f"• {rule_result['symbol']} {rule_result.get('name', '')} 目前分數為 {rule_result['score']}，強度為 {rule_result['strength']}。"
     )
 
     if rule_result["strength"] > 0:
@@ -210,7 +228,10 @@ def analyze_stock_with_gemini(rule_result):
     prompt = f"""
 你是一個台股短線交易分析助理。
 
+請全部使用繁體中文，不要使用英文，不要加客套開頭。
+
 股票代號：{rule_result["symbol"]}
+股票名稱：{rule_result.get("name", "")}
 目前價格：{rule_result["close"]}
 開盤價：{rule_result["open"]}
 日內高點：{rule_result["high"]}
@@ -218,12 +239,16 @@ def analyze_stock_with_gemini(rule_result):
 強度（strength）：{rule_result["strength"]}
 綜合評分（score）：{rule_result["score"]}
 
-請用繁體中文簡單回答：
-1. 這檔股票目前強在哪
-2. 有哪些風險
-3. 接下來該怎麼觀察或操作
+請用以下格式輸出：
 
-請用條列式，精簡但有重點。
+【強勢原因】
+- ...
+
+【風險】
+- ...
+
+【操作建議】
+- ...
 """
 
     models = ["gemini-2.5-flash", "gemini-2.0-flash"]
@@ -254,6 +279,7 @@ def analyze_stock_logic(symbol: str):
 
     data = get_stock_data(symbol)
 
+    name = safe_get_name(data, symbol)
     close = safe_get_close(data)
     open_price = safe_get_open(data)
     high_price = safe_get_high(data)
@@ -280,6 +306,7 @@ def analyze_stock_logic(symbol: str):
 
     return {
         "symbol": symbol,
+        "name": name,
         "close": close,
         "open": open_price,
         "high": high_price,
