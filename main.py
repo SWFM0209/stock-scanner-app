@@ -21,6 +21,10 @@ class AnalyzeRequest(BaseModel):
 
 
 def load_symbols():
+    if not os.path.exists("symbols.txt"):
+        print("symbols.txt 不存在")
+        return []
+
     with open("symbols.txt", "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
 
@@ -301,18 +305,21 @@ def root():
 
 @app.get("/scan")
 def scan():
-    symbols = load_symbols()
-    result = []
+    try:
+        symbols = load_symbols()
+        result = []
 
-    for s in symbols:
-        try:
-            data = analyze_stock_logic(s)
-            result.append(data)
-        except Exception as e:
-            print(f"scan error {s}: {e}")
+        for s in symbols:
+            try:
+                data = analyze_stock_logic(s)
+                result.append(data)
+            except Exception as e:
+                print(f"scan error {s}: {e}")
 
-    result = sorted(result, key=lambda x: x["score"], reverse=True)
-    return {"count": len(result), "data": result}
+        result = sorted(result, key=lambda x: x["score"], reverse=True)
+        return {"count": len(result), "data": result}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/company/{symbol}")
