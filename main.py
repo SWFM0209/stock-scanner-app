@@ -289,6 +289,11 @@ def analyze_stock_logic(symbol: str):
     }
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/")
 def root():
     return {"ok": True}
