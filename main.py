@@ -290,4 +290,4 @@ def ai(req: AnalyzeRequest):
         return {**r, **llm}
     except Exception as e:
         return {"error": str(e)}
-EOF
+
