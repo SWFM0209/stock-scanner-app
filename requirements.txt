@@ -1,7 +1,2 @@
-fastapi
-uvicorn
-gunicorn
-pydantic
-google-genai
-fugle-marketdata
-requests
+streamlit
+plotly
