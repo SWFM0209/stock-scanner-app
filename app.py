@@ -69,7 +69,7 @@ for stock in candidates:
         st.markdown(f"""
 ### {stock['symbol']} {stock.get('name','')}
 
-收盤：{stock['close']}  
+收盤：{stock.get('close', stock.get('Close', '無資料'))}  
 60日高點：{stock['h1']}  
 MA5 / MA10 / MA20：{stock['ma5']} / {stock['ma10']} / {stock['ma20']}  
 成交量：{stock['volume']:,}  
