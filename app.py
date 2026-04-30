@@ -20,18 +20,18 @@ def get_stock_name_from_fugle(symbol):
 
     try:
         url = f"https://api.fugle.tw/marketdata/v1.0/stock/intraday/ticker/{symbol}"
-        headers = {"X-API-KEY": api_key}
+        params = {"apiToken": api_key}
 
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, params=params, timeout=5)
         if res.status_code != 200:
             return ""
 
         data = res.json()
         return (
-            data.get("name")
-            or data.get("symbolName")
-            or data.get("data", {}).get("name")
+            data.get("data", {}).get("name")
             or data.get("data", {}).get("symbolName")
+            or data.get("name")
+            or data.get("symbolName")
             or ""
         )
     except Exception:
@@ -55,7 +55,17 @@ def format_volume(value):
 
 
 def render_stock_card(stock):
-    symbol = str(get_value(stock, "symbol", "code", "stock_id", "股票代號", "代號", default="-"))
+    symbol = str(
+        get_value(
+            stock,
+            "symbol",
+            "code",
+            "stock_id",
+            "股票代號",
+            "代號",
+            default="-"
+        )
+    )
 
     name = get_value(
         stock,
@@ -71,12 +81,40 @@ def render_stock_card(stock):
     if not name:
         name = get_stock_name_from_fugle(symbol)
 
-    close = get_value(stock, "close", "Close", "last", "收盤", "收盤價", "price", "last_price")
-    h1 = get_value(stock, "h1", "H1", "high_60", "high60", "60_high", "h60", "60日高點", "60日高價")
+    close = get_value(
+        stock,
+        "close",
+        "Close",
+        "last",
+        "收盤",
+        "收盤價",
+        "price",
+        "last_price"
+    )
+
+    h1 = get_value(
+        stock,
+        "h1",
+        "H1",
+        "high_60",
+        "high60",
+        "60_high",
+        "h60",
+        "60日高點",
+        "60日高價"
+    )
+
     ma5 = get_value(stock, "ma5", "MA5", "ma_5", "5日均線")
     ma10 = get_value(stock, "ma10", "MA10", "ma_10", "10日均線")
     ma20 = get_value(stock, "ma20", "MA20", "ma_20", "20日均線")
-    volume = get_value(stock, "volume", "Volume", "成交量", "成交股數")
+
+    volume = get_value(
+        stock,
+        "volume",
+        "Volume",
+        "成交量",
+        "成交股數"
+    )
 
     title = f"{symbol} {name}" if name else symbol
 
@@ -103,7 +141,7 @@ st.caption("雙層策略：候選股 + 確認訊號 + K線圖")
 st.markdown(f"""
 更新時間：{data.get("updated_at", "-")}
 
-掃描總數：{data.get("total", 0)}
+掃描總數：{data.get("total", data.get("progress", 0))}
 """)
 
 confirmed = data.get("confirmed", data.get("matched", []))
