@@ -9,17 +9,39 @@ st.set_page_config(page_title="詹姆士選股", layout="wide")
 BASE_DIR = Path(__file__).parent
 DATA_PATH = BASE_DIR / "latest_scan_result.json"
 
-STOCK_NAME_MAP = {
-    "1785": "光洋科",
-    "2243": "宏旭-KY",
-    "6147": "頎邦",
-}
+
+@st.cache_data(ttl=86400)
+def load_stock_name_map():
+    name_map = {}
+
+    urls = [
+        "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2",
+        "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4",
+    ]
+
+    for url in urls:
+        try:
+            tables = pd.read_html(url)
+            df = tables[0]
+
+            for value in df.iloc[:, 0].dropna():
+                text = str(value).strip()
+                parts = text.split()
+
+                if len(parts) >= 2 and parts[0].isdigit():
+                    name_map[parts[0]] = parts[1]
+        except Exception:
+            pass
+
+    return name_map
+
 
 def get_value(stock, *keys, default="無資料"):
     for key in keys:
         if key in stock and stock[key] is not None and stock[key] != "":
             return stock[key]
     return default
+
 
 def format_volume(value):
     if value in ["無資料", None, ""]:
@@ -29,7 +51,8 @@ def format_volume(value):
     except Exception:
         return str(value)
 
-def render_stock_card(stock):
+
+def render_stock_card(stock, stock_name_map):
     symbol = str(get_value(stock, "symbol", "code", "stock_id", default="-"))
 
     name = get_value(
@@ -44,7 +67,7 @@ def render_stock_card(stock):
     )
 
     if not name:
-        name = STOCK_NAME_MAP.get(symbol, "")
+        name = stock_name_map.get(symbol, "")
 
     close = get_value(stock, "close", "Close", "last", "收盤", "收盤價")
     h1 = get_value(stock, "h1", "H1", "high_60", "high60", "60_high", "h60", "60日高點")
@@ -64,12 +87,15 @@ MA5 / MA10 / MA20：{ma5} / {ma10} / {ma20}
 成交量：{format_volume(volume)}  
     """)
 
+
 if not DATA_PATH.exists():
     st.warning("尚未找到 latest_scan_result.json，請先跑掃描")
     st.stop()
 
 with open(DATA_PATH, "r", encoding="utf-8") as f:
     data = json.load(f)
+
+stock_name_map = load_stock_name_map()
 
 st.title("📈 詹姆士選股")
 st.caption("雙層策略：候選股 + 確認訊號 + K線圖")
@@ -90,7 +116,7 @@ if len(confirmed) == 0:
 else:
     for stock in confirmed:
         with st.container():
-            render_stock_card(stock)
+            render_stock_card(stock, stock_name_map)
 
 st.subheader(f"🟡 候選股：{len(candidates)} 檔")
 
@@ -99,12 +125,13 @@ if len(candidates) == 0:
 else:
     for stock in candidates:
         with st.container():
-            render_stock_card(stock)
+            render_stock_card(stock, stock_name_map)
 
 st.divider()
 st.subheader("📊 K線圖")
 
 symbol = st.text_input("輸入股票代碼（例如 2330）", "2330")
+
 
 def generate_fake_kline():
     return pd.DataFrame({
@@ -114,6 +141,7 @@ def generate_fake_kline():
         "low": pd.Series(range(98, 158)),
         "close": pd.Series(range(101, 161)),
     })
+
 
 df = generate_fake_kline()
 
