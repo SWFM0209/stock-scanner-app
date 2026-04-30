@@ -96,7 +96,7 @@ with open(DATA_PATH, "r", encoding="utf-8") as f:
     data = json.load(f)
 
 stock_name_map = load_stock_name_map()
-
+st.caption(f"股票名稱表載入：{len(stock_name_map)} 筆")
 st.title("📈 詹姆士選股")
 st.caption("雙層策略：候選股 + 確認訊號 + K線圖")
 
